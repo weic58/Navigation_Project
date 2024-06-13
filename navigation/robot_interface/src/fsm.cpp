@@ -168,8 +168,15 @@ void FSM::initFSMTable()
     fsm_table_.push_back(new FSMItem(FSMItem::State::MOVE_INTO_ELEVATOR, FSMItem::Events::E_FINISH_MOVE_SUCCESS, FSMItem::State::SAY_FLOOR));
     fsm_table_.push_back(new FSMItem(FSMItem::State::SAY_FLOOR, FSMItem::Events::E_FINISH_SAY, FSMItem::State::WAIT_FOR_ELEVATOR));
     fsm_table_.push_back(new FSMItem(FSMItem::State::WAIT_FOR_ELEVATOR, FSMItem::Events::E_SUCCESS_UPDOWN, FSMItem::State::GET_OUT_OF_ELEVATOR));
+    fsm_table_.push_back(new FSMItem(FSMItem::State::WAIT_FOR_ELEVATOR, FSMItem::Events::E_DEBUG, FSMItem::State::GET_OUT_OF_ELEVATOR));
     fsm_table_.push_back(new FSMItem(FSMItem::State::GET_OUT_OF_ELEVATOR, FSMItem::Events::E_FINISH_MOVE_SUCCESS, FSMItem::State::MOVE_TO_GOAL_4));
     fsm_table_.push_back(new FSMItem(FSMItem::State::MOVE_TO_GOAL_4, FSMItem::Events::E_FINISH_MOVE_SUCCESS, FSMItem::State::STOP));
-
+    
+    // debug
+    // fsm_table_.push_back(new FSMItem(FSMItem::State::STOP, FSMItem::Events::E_DEBUG, FSMItem::State::RAISE_HAND));
+    // fsm_table_.push_back(new FSMItem(FSMItem::State::RAISE_HAND, FSMItem::Events::E_DEBUG, FSMItem::State::MOVE_TO_GOAL_2));
+    // fsm_table_.push_back(new FSMItem(FSMItem::State::STOP, FSMItem::Events::E_DEBUG, FSMItem::State::SAY_FLOOR));
+    // fsm_table_.push_back(new FSMItem(FSMItem::State::GET_DOOR, FSMItem::Events::E_DEBUG, FSMItem::State::GET_OUT_OF_ELEVATOR));
+    
 
 }

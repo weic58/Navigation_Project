@@ -3,6 +3,7 @@
 #include "std_msgs/UInt8MultiArray.h"
 #include "std_msgs/Int8.h"
 #include "geometry_msgs/PoseStamped.h"
+#include "geometry_msgs/PoseWithCovarianceStamped.h"
 #include "robot_interface/fsm_item.h"
 #include "robot_interface/fsm.h"
 #include "robot_interface/robot_interface.h"
@@ -30,14 +31,16 @@ void Interface::initialize()
     sub_arrived_ = nh_.subscribe("finishornot", 10, &Interface::finishCB, this);
     sub_finish_exploration_ = nh_.subscribe("finish_exploration", 10, &Interface::finishExplorationCB, this);
     sub_floor_ = nh_.subscribe("floor", 10, &Interface::floorCB, this);
+    sub_elevator_status_ = nh_.subscribe("elevator_status", 10, &Interface::elevatorCB, this);
+    sub_elevator_open_status_ = nh_.subscribe("elevator_open_status", 10, &Interface::elevatorOpenCB, this);
 
     pub_start_gmapping_ = nh_.advertise<std_msgs::Int8>("slam_gmapping/reset", 1);
     pub_vel_ = nh_.advertise<geometry_msgs::Twist>("cmd_vel", 10);
     pub_goal_ = nh_.advertise<geometry_msgs::PoseStamped>("nav_goal", 10);
     pub_start_exploration_ = nh_.advertise<std_msgs::Int8>("fron_exp_mission", 1);
-    pub_robot_state_ = nh_.advertise<robot_interface::RobotState>("robot_state", 1);
-    pub_mechanism_mission_ = nh_.advertise<std_msgs::UInt8MultiArray>("mechanism_mission", 1);
-
+    pub_robot_state_ = nh_.advertise<pme_amr_msg::RobotState>("robot_state", 1);
+    pub_mechanism_mission_ = nh_.advertise<std_msgs::UInt8MultiArray>("amr_mission", 1);
+    pub_initial_state_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("initialpose", 1);
 
     // parameter initialize
     nh_local_.param<std::string>("map_frame", map_frame_, "map");
@@ -84,7 +87,13 @@ void Interface::updateState()
     }else if(interface_buf_.mission.compare("record_position") == 0){
         fsm->handleEvent(FSMItem::Events::E_RECORD_COORDINATE);
     }else if(interface_buf_.mission.compare("move_to_goal_floor") == 0){
-        fsm->handleEvent(FSMItem::Events::E_MOVE_TO_GOAL_FLOOR);
+        if(get_floor_ == true){
+            fsm->handleEvent(FSMItem::Events::E_MOVE_TO_GOAL_FLOOR);
+        }else{
+            ROS_ERROR("Robot_Interface: Cannot subscribe current floor.");
+        }
+    }else if(interface_buf_.mission.compare("debug") == 0){
+        fsm->handleEvent(FSMItem::Events::E_DEBUG);
     }
     else if(event == FSMItem::Events::E_FAST_V){
         fsm->handleEvent(event);
@@ -206,6 +215,7 @@ void Interface::execute()
                 }else{
                     event = FSMItem::Events::E_SAME_FLOOR_MOVE;
                 }
+                break;
             }
             case FSMItem::State::MOVE_TO_GOAL_1:
             {
@@ -214,10 +224,22 @@ void Interface::execute()
             }
             case FSMItem::State::RAISE_HAND:
             {
-                std_msgs::UInt8MultiArray msg;
-                msg.data.push_back(1);
-                msg.data.push_back(90);
-                pub_mechanism_mission_.publish(msg);
+                static int time = 0;
+                if(time == 0){
+                    std_msgs::UInt8MultiArray msg;
+                    msg.data.push_back(1);
+                    msg.data.push_back(1);
+                    pub_mechanism_mission_.publish(msg);
+                    time++;
+                    return;
+                }else if(time < 2 * process_frequency_){
+                    time++;
+                    return;
+                }else{
+                    event = FSMItem::Events::E_FINISH_RAISE_HAND;
+                    time = 0;
+                    return;
+                }
                 break;
             }
             case FSMItem::State::MOVE_TO_GOAL_2:
@@ -227,32 +249,100 @@ void Interface::execute()
             }
             case FSMItem::State::GET_DOOR:
             {
-                ROS_ERROR("NOT IMPLEMENT ERROR");
+                if(elevator_status_ != 0){
+                    if(elevator_status_ == 1){
+                        go_left_or_right_ = "right";
+                        ROS_INFO("Robot_Interface: Go right!!");
+                    }else if(elevator_status_ == 2){
+                        go_left_or_right_ = "left";
+                        ROS_INFO("Robot_Interface: Go left!!");
+                    }
+                    event = FSMItem::Events::E_GET_DOOR;
+                }
+                return;
                 break;
             }
             case FSMItem::State::MOVE_TO_GOAL_3:
             {
-                publishGoalFromList(floor_, 3);
+                ROS_INFO("elevator_status: %d", elevator_status_);
+                if(go_left_or_right_.compare("right") == 0){
+                    publishGoalFromList(floor_, 4);
+                }else if(go_left_or_right_.compare("left") == 0){
+                    publishGoalFromList(floor_, 3);
+                }
+                
                 break;
             }
             case FSMItem::State::MOVE_INTO_ELEVATOR:
             {
+                if(go_left_or_right_.compare("right") == 0){
+                    publishGoalFromList(floor_, 6);
+                }else if(go_left_or_right_.compare("left") == 0){
+                    publishGoalFromList(floor_, 5);
+                }
+                // publishGoalFromList(floor_, 5);
                 ROS_ERROR("NOT IMPLEMENT ERROR");
                 break;
             }
             case FSMItem::State::SAY_FLOOR:
             {
-                ROS_ERROR("NOT IMPLEMENT ERROR");
+                static int time = 0;
+                if(time == 0){
+                    std::string floor = std::to_string(static_cast<int>(interface_buf_.floor.data));
+                    ROS_INFO("floor:%s", floor.c_str());
+                    std::string str = "mpg321 ${MUSIC_PATH}/f1/" + floor + "f.mp3";
+                    const char *command1 = str.c_str();
+                    auto _ = popen(command1, "r");
+                    time++;
+                    return;
+                }else if(time < 4 * process_frequency_){
+                    time++;
+                    return;
+                }else{
+                    std::string str = "mpg321 ${MUSIC_PATH}/f1/close-the-door.mp3";
+                    const char *command2 = str.c_str();
+                    auto _ = popen(command2, "r");
+                    event = FSMItem::Events::E_FINISH_SAY;
+                    return;
+                }
+                
                 break;
             }
             case FSMItem::State::WAIT_FOR_ELEVATOR:
             {
-                ROS_ERROR("NOT IMPLEMENT ERROR");
+                if(floor_ == interface_buf_.floor.data){
+                    if(elevator_open_status_ == 1){
+                        event = FSMItem::Events::E_SUCCESS_UPDOWN;
+                    }
+                }
+                
+                static bool publish_map = false;
+                if(publish_map == false){
+                    std::stringstream ss;
+                    ss << static_cast<int>(interface_buf_.floor.data);
+                    std::string str = "rosrun map_server map_server ${MAP_PATH}/EngBuild" + ss.str() + ".yaml";
+                    const char *command = str.c_str();
+                    ROS_INFO("Robot_Interface: open map file using '%s'", command);
+                    auto _ = popen(command, "r");
+                    if(go_left_or_right_.compare("right") == 0){
+                        publishInitialStateFromList(interface_buf_.floor.data, 4);
+                    }else if(go_left_or_right_.compare("left") == 0){
+                        publishInitialStateFromList(interface_buf_.floor.data, 3);
+                    }
+                    publish_map = true;
+                }
+
+                return;
                 break;
             }
             case FSMItem::State::GET_OUT_OF_ELEVATOR:
             {
-                ROS_ERROR("NOT IMPLEMENT ERROR");
+                int floor_now = interface_buf_.floor.data;
+                if(go_left_or_right_.compare("right") == 0){
+                    publishGoalFromList(floor_now, 6);
+                }else if(go_left_or_right_.compare("left") == 0){
+                    publishGoalFromList(floor_now, 5);
+                }
                 break;
             }
             case FSMItem::State::MOVE_TO_GOAL_4:
@@ -269,10 +359,11 @@ void Interface::execute()
 
 void Interface::publishState(Publish_State state)
 {
-    robot_interface::RobotState msg;
+    pme_amr_msg::RobotState msg;
+    msg.robot_id.data = 0;
     switch(state){
         case Publish_State::REACH:{
-            msg.state.data = "REACH";
+            msg.state.data = "GOAL";
             break;
         }
         case Publish_State::STUCK:{
@@ -280,14 +371,15 @@ void Interface::publishState(Publish_State state)
             break;
         }
     }
-    msg.robot_id.data = 1;
     pub_robot_state_.publish(msg);
 }
 
 void Interface::checkSubFloor()
 {
+    get_floor_ = true;
     if((ros::Time::now() - t_recent_floor_).toSec() > 0.1){
         ROS_WARN_THROTTLE(0.5, "Robot_Interface: Cannot subscribe current floor ... ");
+        get_floor_ = false;
     }
 }
 
@@ -300,11 +392,32 @@ void Interface::publishGoalFromList(int f, int n)
     goal.pose.position.x = goal_list_[f-1][n-1][0];
     goal.pose.position.y = goal_list_[f-1][n-1][1];
     tf::Quaternion q;
-    q.setRPY(0, 0, goal_list_[f-1][n-1][2]/180.0*PI);
+    q.setRPY(0, 0, goal_list_[f-1][n-1][2]);
     geometry_msgs::Quaternion odom_quat;
     tf::quaternionTFToMsg(q, odom_quat);
     goal.pose.orientation = odom_quat;
     pub_goal_.publish(goal);
+}
+
+void Interface::publishInitialStateFromList(int f, int n)
+{
+    // publish the n'th goal in goal_list
+    geometry_msgs::PoseWithCovarianceStamped state;
+    state.header.stamp = ros::Time::now();
+    state.header.frame_id = map_frame_;
+    state.pose.pose.position.x = goal_list_[f-1][n-1][0];
+    state.pose.pose.position.y = goal_list_[f-1][n-1][1];
+    tf::Quaternion q;
+    q.setRPY(0, 0, goal_list_[f-1][n-1][2]);
+    geometry_msgs::Quaternion odom_quat;
+    tf::quaternionTFToMsg(q, odom_quat);
+    state.pose.pose.orientation = odom_quat;
+
+    // state.pose.covariance[0 * 6 + 0] = 1;
+    // state.pose.covariance[1 * 6 + 1] = 1;
+    // state.pose.covariance[5 * 6 + 6] = 1;
+
+    pub_initial_state_.publish(state);
 }
 
 void Interface::timerCB(const ros::TimerEvent &)
@@ -325,7 +438,9 @@ void Interface::timerVelocityCB(const ros::TimerEvent &)
         case FSMItem::State::MOVE_TO_GOAL_1:
         case FSMItem::State::MOVE_TO_GOAL_2:
         case FSMItem::State::MOVE_TO_GOAL_3:
+        case FSMItem::State::MOVE_INTO_ELEVATOR:
         case FSMItem::State::MOVE_TO_GOAL_4:
+        case FSMItem::State::GET_OUT_OF_ELEVATOR:
         {
             geometry_msgs::Twist data;
             data = navi_vel_buf_;
@@ -352,7 +467,7 @@ void Interface::timerVelocityCB(const ros::TimerEvent &)
     }
 }
 
-void Interface::interfaceCB(const robot_interface::Interface::ConstPtr & msg)
+void Interface::interfaceCB(const pme_amr_msg::Interface::ConstPtr & msg)
 {
     interface_buf_ = *msg;
 }
@@ -394,7 +509,9 @@ void Interface::finishCB(const std_msgs::CharConstPtr &msg)
        fsm->getState() != FSMItem::State::MOVE_TO_GOAL_1 &&
        fsm->getState() != FSMItem::State::MOVE_TO_GOAL_2 &&
        fsm->getState() != FSMItem::State::MOVE_TO_GOAL_3 &&
-       fsm->getState() != FSMItem::State::MOVE_TO_GOAL_4)
+       fsm->getState() != FSMItem::State::MOVE_INTO_ELEVATOR &&
+       fsm->getState() != FSMItem::State::MOVE_TO_GOAL_4 &&
+       fsm->getState() != FSMItem::State::GET_OUT_OF_ELEVATOR)
         return;
 
     if(msg->data == 1){
@@ -428,6 +545,19 @@ void Interface::floorCB(const std_msgs::Int8::ConstPtr &msg)
 {
     floor_ = msg->data;
     t_recent_floor_ = ros::Time::now();
+}
+
+void Interface::elevatorCB(const std_msgs::Int8::ConstPtr & msg)
+{
+    if(fsm->getState() == FSMItem::State::GET_DOOR){
+        elevator_status_ = static_cast<int>(msg->data);
+    }
+    
+}
+
+void Interface::elevatorOpenCB(const std_msgs::Int8::ConstPtr & msg)
+{
+    elevator_open_status_ = msg->data;
 }
 
 int main(int argc, char** argv)

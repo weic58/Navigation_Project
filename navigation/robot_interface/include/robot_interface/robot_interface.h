@@ -1,8 +1,8 @@
 #include "ros/ros.h"
 #include "robot_interface/fsm_item.h"
 #include "robot_interface/fsm.h"
-#include "robot_interface/Interface.h"
-#include "robot_interface/RobotState.h"
+#include "pme_amr_msg/Interface.h"
+#include "pme_amr_msg/RobotState.h"
 #include "robot_interface/record_pose.h"
 
 #include "geometry_msgs/Twist.h"
@@ -34,20 +34,28 @@ public:
     ros::Subscriber sub_pose_;
     ros::Subscriber sub_finish_exploration_;
     ros::Subscriber sub_floor_;
+    ros::Subscriber sub_elevator_status_;
+    ros::Subscriber sub_elevator_open_status_;
     ros::Publisher pub_start_gmapping_;
     ros::Publisher pub_start_exploration_;
     ros::Publisher pub_vel_;
     ros::Publisher pub_goal_;
     ros::Publisher pub_robot_state_;
     ros::Publisher pub_mechanism_mission_;
+    ros::Publisher pub_initial_state_;
 
     // topic buffer
-    robot_interface::Interface interface_buf_;
+    pme_amr_msg::Interface interface_buf_;
     geometry_msgs::Twist navi_vel_buf_;
     geometry_msgs::Twist control_vel_buf_;
     Pose pose_buf_;
     int floor_;
+    int elevator_status_;
+    std::string go_left_or_right_;
+    int elevator_open_status_;
     ros::Time t_recent_floor_;
+    bool get_floor_;
+
 
     std::string cur_map_;
 
@@ -87,12 +95,15 @@ public:
 
     // argument: f->floor, n->number of goal
     void publishGoalFromList(int f, int n);
-    
+
+    // argument: f->floor, n->number of goal
+    void publishInitialStateFromList(int f, int n);
+
     void timerCB(const ros::TimerEvent &);
 
     void timerVelocityCB(const ros::TimerEvent &);
 
-    void interfaceCB(const robot_interface::Interface::ConstPtr& msg);
+    void interfaceCB(const pme_amr_msg::Interface::ConstPtr& msg);
 
     void controlVelCB(const geometry_msgs::Twist::ConstPtr& msg);
 
@@ -106,5 +117,8 @@ public:
 
     void floorCB(const std_msgs::Int8::ConstPtr& msg);
 
+    void elevatorCB(const std_msgs::Int8::ConstPtr& msg);
+
+    void elevatorOpenCB(const std_msgs::Int8::ConstPtr& msg);
 private:
 };
